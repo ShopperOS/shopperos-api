@@ -19,35 +19,28 @@ class EmbeddingService:
     def _load(self):
         print("Loading embeddings...")
         
-        # Load embeddings
         self.embeddings = np.load(DATA_DIR / "embeddings" / "hybrid_embeddings.npy", allow_pickle=True)
         
-        # Load mappings
         with open(DATA_DIR / "embeddings" / "id_mappings.pkl", "rb") as f:
             mappings = pickle.load(f)
         self.id_to_idx = mappings["id_to_idx"]
         self.idx_to_id = mappings["idx_to_id"]
         
-        # Load products
         import pandas as pd
         self.products = pd.read_parquet(DATA_DIR / "processed" / "products_extended.parquet")
         self.products["id"] = self.products["id"].astype(str).str.lstrip("0")
         
-        # Load demo taste vectors (fallback)
         with open(DATA_DIR / "taste" / "user_taste_vectors.pkl", "rb") as f:
             self.demo_taste_vectors = pickle.load(f)
         
-        # Cache for fetched taste vectors
         self.user_taste_vectors_cache = {}
         
-        # Load popular/trending
         with open(DATA_DIR / "taste" / "popular_products.pkl", "rb") as f:
             self.popular_products = pickle.load(f)
         
         with open(DATA_DIR / "taste" / "trending.pkl", "rb") as f:
             self.trending = pickle.load(f)
         
-        # Edge function config
         self.functions_url = os.environ.get("LOVABLE_FUNCTIONS_URL", "")
         self.api_key = os.environ.get("RAILWAY_API_KEY", "")
         
@@ -55,12 +48,9 @@ class EmbeddingService:
         print(f"Edge functions URL configured: {bool(self.functions_url)}")
     
     def get_user_taste_vector(self, user_id: str) -> np.ndarray:
-        """Get taste vector for user - checks edge function first, then demo data"""
-        # Check cache first
         if user_id in self.user_taste_vectors_cache:
             return self.user_taste_vectors_cache[user_id]
         
-        # Try fetching from Lovable edge function
         if self.functions_url and self.api_key:
             try:
                 response = httpx.get(
@@ -79,24 +69,20 @@ class EmbeddingService:
             except Exception as e:
                 print(f"Error fetching taste vector from edge function: {e}")
         
-        # Check demo data
         if user_id in self.demo_taste_vectors:
             return self.demo_taste_vectors[user_id]
         
         return None
     
     def has_taste_vector(self, user_id: str) -> bool:
-        """Check if user has a taste vector"""
         return self.get_user_taste_vector(user_id) is not None
     
     def search_similar(self, query_vec: np.ndarray, k: int = 10):
-        """Numpy-based similarity search"""
         scores = self.embeddings @ query_vec
         top_k = np.argsort(scores)[-k:][::-1]
         return top_k, scores[top_k]
     
     def get_product(self, product_id: str) -> dict:
-        """Get product by ID"""
         pid = str(product_id).lstrip("0")
         prod = self.products[self.products["id"] == pid]
         if len(prod) == 0:
@@ -114,7 +100,6 @@ class EmbeddingService:
         }
     
     def get_embedding(self, product_id: str) -> np.ndarray:
-        """Get embedding for a product"""
         pid = str(product_id).lstrip("0")
         if pid not in self.id_to_idx:
             return None
@@ -124,8 +109,3 @@ class EmbeddingService:
 @lru_cache()
 def get_embedding_service() -> EmbeddingService:
     return EmbeddingService()
-```
-
-Also add `httpx` to your `requirements.txt`:
-```
-httpx
