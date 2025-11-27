@@ -5,6 +5,17 @@ from app.services.embeddings import EmbeddingService, get_embedding_service
 
 router = APIRouter()
 
+@router.get("/debug")
+def debug(svc: EmbeddingService = Depends(get_embedding_service)):
+    """Debug endpoint to check data loading"""
+    pop_sample = svc.popular_products[:3] if svc.popular_products else []
+    return {
+        "num_products": len(svc.products),
+        "num_popular": len(svc.popular_products),
+        "popular_sample": pop_sample,
+        "sample_product_ids": svc.products["id"].head(5).tolist()
+    }
+
 @router.post("/get_personalized_catalog")
 def get_personalized_catalog(
     user_id: str,
