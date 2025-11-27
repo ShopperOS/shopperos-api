@@ -5,6 +5,14 @@ from app.services.embeddings import EmbeddingService, get_embedding_service
 
 router = APIRouter()
 
+def add_image_url(product: dict) -> dict:
+    """Generate R2 image URL from product ID"""
+    if product and product.get("id"):
+        pid = str(product["id"]).zfill(10)
+        folder = pid[:3]
+        product["image_url"] = f"https://pub-7907e757920c43e5a62f414cfbe74387.r2.dev/{folder}/{pid}.jpg"
+    return product
+
 @router.get("/debug")
 def debug(svc: EmbeddingService = Depends(get_embedding_service)):
     """Debug endpoint to check data loading"""
@@ -29,9 +37,7 @@ def get_personalized_catalog(
     """
     Get personalized product catalog for a user.
     """
-    # Check if user has taste vector
     if user_id not in svc.user_taste_vectors:
-        # Cold start - return popular products
         products = []
         for item in svc.popular_products[:k]:
             pid = item['product_id'] if isinstance(item, dict) else item
@@ -39,13 +45,11 @@ def get_personalized_catalog(
             prod = svc.get_product(pid)
             if prod:
                 prod["affinity_score"] = item.get('affinity_score', 0.5) if isinstance(item, dict) else 0.5
+                add_image_url(prod)
                 products.append(prod)
         return {"products": products, "is_cold_start": True}
     
-    # Get user taste vector
     taste_vector = svc.user_taste_vectors[user_id]
-    
-    # Search similar products
     indices, scores = svc.search_similar(taste_vector, k=k * 3)
     
     products = []
@@ -56,7 +60,6 @@ def get_personalized_catalog(
         if prod is None:
             continue
         
-        # Apply filters
         if category_filter and prod["category"] != category_filter:
             continue
         if price_min and prod["price"] < price_min:
@@ -65,6 +68,7 @@ def get_personalized_catalog(
             continue
         
         prod["affinity_score"] = float(scores[i])
+        add_image_url(prod)
         products.append(prod)
         
         if len(products) >= k:
@@ -81,12 +85,10 @@ def compute_taste_from_calibration(
 ):
     """
     Compute taste vector from onboarding calibration (20 swipes).
-    Returns personalized recommendations for the new user.
     """
     if not liked_ids:
         return {"error": "Need at least one liked product"}
     
-    # Get embeddings for liked items
     liked_vectors = []
     for pid in liked_ids:
         emb = svc.get_embedding(pid)
@@ -96,10 +98,8 @@ def compute_taste_from_calibration(
     if not liked_vectors:
         return {"error": "No valid products found"}
     
-    # Compute taste as average of likes
     taste_vector = np.mean(liked_vectors, axis=0)
     
-    # Subtract dislikes if any
     if disliked_ids:
         disliked_vectors = []
         for pid in disliked_ids:
@@ -110,10 +110,8 @@ def compute_taste_from_calibration(
             dislike_avg = np.mean(disliked_vectors, axis=0)
             taste_vector = taste_vector - 0.3 * dislike_avg
     
-    # Normalize
     taste_vector = taste_vector / (np.linalg.norm(taste_vector) + 1e-8)
     
-    # Get recommendations
     indices, scores = svc.search_similar(taste_vector, k=20)
     
     products = []
@@ -125,6 +123,7 @@ def compute_taste_from_calibration(
         prod = svc.get_product(pid)
         if prod:
             prod["affinity_score"] = float(scores[i])
+            add_image_url(prod)
             products.append(prod)
         if len(products) >= 10:
             break
@@ -143,7 +142,6 @@ def get_calibration_products(
     """
     Get diverse products for onboarding calibration.
     """
-    # Sample across categories
     categories = svc.products["product_type_name"].value_counts().head(10).index.tolist()
     
     products = []
@@ -154,14 +152,16 @@ def get_calibration_products(
             min(per_category, len(svc.products[svc.products["product_type_name"] == cat]))
         )
         for _, row in cat_prods.iterrows():
-            products.append({
+            prod = {
                 "id": row["id"],
                 "name": row["name"],
                 "category": row["product_type_name"],
                 "color": row["colour_group_name"],
                 "price": row.get("price", 49.99),
-                "image_url": row.get("image_url", "")
-            })
+                "image_url": None
+            }
+            add_image_url(prod)
+            products.append(prod)
         if len(products) >= n:
             break
     
