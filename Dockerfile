@@ -3,11 +3,13 @@ FROM python:3.11-slim
 WORKDIR /app
 
 # Install git-lfs
-RUN apt-get update && apt-get install -y git git-lfs && git lfs install
+RUN apt-get update && apt-get install -y git-lfs && rm -rf /var/lib/apt/lists/*
 
-# Clone repo with LFS files
-ARG REPO_URL
-RUN git clone ${REPO_URL} . && git lfs pull
+# Copy app
+COPY . .
+
+# Pull LFS files
+RUN git lfs install && git lfs pull
 
 # Install dependencies
 RUN pip install --no-cache-dir -r requirements.txt
