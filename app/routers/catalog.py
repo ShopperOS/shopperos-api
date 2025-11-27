@@ -22,10 +22,11 @@ def get_personalized_catalog(
     if user_id not in svc.user_taste_vectors:
         # Cold start - return popular products
         products = []
-        for pid in svc.popular_products[:k]:
+        for item in svc.popular_products[:k]:
+            pid = item['product_id'] if isinstance(item, dict) else item
             prod = svc.get_product(pid)
             if prod:
-                prod["affinity_score"] = 0.5
+                prod["affinity_score"] = item.get('affinity_score', 0.5) if isinstance(item, dict) else 0.5
                 products.append(prod)
         return {"products": products, "is_cold_start": True}
     
