@@ -34,7 +34,7 @@ def debug(svc: EmbeddingService = Depends(get_embedding_service)):
         "sample_product_ids": svc.products["id"].head(5).tolist()
     }
 
-@router.post("/get_personalized_catalog")
+@router.get("/get_personalized_catalog")
 def get_personalized_catalog(
     user_id: str,
     k: int = Query(default=48, le=100),
