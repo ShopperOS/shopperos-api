@@ -24,6 +24,7 @@ def get_personalized_catalog(
         products = []
         for item in svc.popular_products[:k]:
             pid = item['product_id'] if isinstance(item, dict) else item
+            pid = str(pid).lstrip('0')
             prod = svc.get_product(pid)
             if prod:
                 prod["affinity_score"] = item.get('affinity_score', 0.5) if isinstance(item, dict) else 0.5
