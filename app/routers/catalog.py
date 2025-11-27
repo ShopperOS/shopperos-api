@@ -33,6 +33,23 @@ def debug(svc: EmbeddingService = Depends(get_embedding_service)):
         "sample_product_ids": svc.products["id"].head(5).tolist()
     }
 
+@router.get("/get_categories")
+def get_categories(
+    gender: Optional[str] = Query(default=None),
+    svc: EmbeddingService = Depends(get_embedding_service)
+):
+    """Get list of available categories, optionally filtered by gender"""
+    df = svc.products
+    
+    if gender:
+        gender_groups = get_gender_filter(gender)
+        df = df[df["index_group_name"].isin(gender_groups)]
+    
+    categories = df["product_type_name"].value_counts().head(30).to_dict()
+    return {
+        "categories": [{"name": k, "count": v} for k, v in categories.items()]
+    }
+
 @router.get("/get_product/{product_id}")
 def get_product(
     product_id: str,
