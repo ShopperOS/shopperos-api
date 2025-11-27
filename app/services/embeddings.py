@@ -1,20 +1,11 @@
 import numpy as np
 import pickle
 import os
+import httpx
 from pathlib import Path
 from functools import lru_cache
-from supabase import create_client, Client
 
 DATA_DIR = Path(__file__).parent.parent.parent / "data"
-
-# Supabase client
-def get_supabase_client() -> Client:
-    url = os.environ.get("SUPABASE_URL")
-    key = os.environ.get("SUPABASE_SERVICE_KEY")
-    if not url or not key:
-        print("Warning: Supabase credentials not set")
-        return None
-    return create_client(url, key)
 
 class EmbeddingService:
     _instance = None
@@ -46,7 +37,7 @@ class EmbeddingService:
         with open(DATA_DIR / "taste" / "user_taste_vectors.pkl", "rb") as f:
             self.demo_taste_vectors = pickle.load(f)
         
-        # Cache for Supabase taste vectors
+        # Cache for fetched taste vectors
         self.user_taste_vectors_cache = {}
         
         # Load popular/trending
@@ -56,59 +47,43 @@ class EmbeddingService:
         with open(DATA_DIR / "taste" / "trending.pkl", "rb") as f:
             self.trending = pickle.load(f)
         
-        # Supabase client
-        self.supabase = get_supabase_client()
+        # Edge function config
+        self.functions_url = os.environ.get("LOVABLE_FUNCTIONS_URL", "")
+        self.api_key = os.environ.get("RAILWAY_API_KEY", "")
         
         print(f"Loaded: {len(self.products)} products, {len(self.demo_taste_vectors)} demo users")
+        print(f"Edge functions URL configured: {bool(self.functions_url)}")
     
     def get_user_taste_vector(self, user_id: str) -> np.ndarray:
-        """Get taste vector for user - checks Supabase first, then demo data"""
+        """Get taste vector for user - checks edge function first, then demo data"""
         # Check cache first
         if user_id in self.user_taste_vectors_cache:
             return self.user_taste_vectors_cache[user_id]
         
-        # Check Supabase
-        if self.supabase:
+        # Try fetching from Lovable edge function
+        if self.functions_url and self.api_key:
             try:
-                result = self.supabase.table("user_taste_vectors").select("taste_vector").eq("user_id", user_id).execute()
-                if result.data and len(result.data) > 0:
-                    taste_vector = np.array(result.data[0]["taste_vector"], dtype=np.float32)
-                    self.user_taste_vectors_cache[user_id] = taste_vector
-                    return taste_vector
+                response = httpx.get(
+                    f"{self.functions_url}/get_user_taste_vector",
+                    params={"user_id": user_id},
+                    headers={"X-API-Key": self.api_key},
+                    timeout=5.0
+                )
+                if response.status_code == 200:
+                    data = response.json()
+                    if data.get("found") and data.get("taste_vector"):
+                        taste_vector = np.array(data["taste_vector"], dtype=np.float32)
+                        self.user_taste_vectors_cache[user_id] = taste_vector
+                        print(f"Fetched taste vector for user {user_id} from edge function")
+                        return taste_vector
             except Exception as e:
-                print(f"Error fetching taste vector from Supabase: {e}")
+                print(f"Error fetching taste vector from edge function: {e}")
         
         # Check demo data
         if user_id in self.demo_taste_vectors:
             return self.demo_taste_vectors[user_id]
         
         return None
-    
-    def save_user_taste_vector(self, user_id: str, taste_vector: np.ndarray) -> bool:
-        """Save taste vector to Supabase"""
-        if not self.supabase:
-            print("Supabase not configured, cannot save taste vector")
-            return False
-        
-        try:
-            # Convert numpy array to list for JSON storage
-            vector_list = taste_vector.tolist()
-            
-            # Upsert to Supabase
-            self.supabase.table("user_taste_vectors").upsert({
-                "user_id": user_id,
-                "taste_vector": vector_list,
-                "updated_at": "now()"
-            }, on_conflict="user_id").execute()
-            
-            # Update cache
-            self.user_taste_vectors_cache[user_id] = taste_vector
-            
-            print(f"Saved taste vector for user {user_id}")
-            return True
-        except Exception as e:
-            print(f"Error saving taste vector to Supabase: {e}")
-            return False
     
     def has_taste_vector(self, user_id: str) -> bool:
         """Check if user has a taste vector"""
@@ -149,3 +124,8 @@ class EmbeddingService:
 @lru_cache()
 def get_embedding_service() -> EmbeddingService:
     return EmbeddingService()
+```
+
+Also add `httpx` to your `requirements.txt`:
+```
+httpx
