@@ -136,7 +136,9 @@ def get_personalized_catalog(
             "has_more": offset + k < total
         }
     
-    indices, scores = svc.search_similar(taste_vector, k=(offset + k) * 3)
+    # Search more when filtering to find enough matches
+    search_multiplier = 20 if category_filter else 3
+    indices, scores = svc.search_similar(taste_vector, k=(offset + k) * search_multiplier)
     
     products = []
     skipped = 0
