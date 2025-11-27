@@ -27,7 +27,8 @@ def debug(svc: EmbeddingService = Depends(get_embedding_service)):
 @router.post("/get_personalized_catalog")
 def get_personalized_catalog(
     user_id: str,
-    k: int = Query(default=20, le=100),
+    k: int = Query(default=48, le=100),
+    offset: int = Query(default=0, ge=0),
     category_filter: Optional[str] = None,
     price_min: Optional[float] = None,
     price_max: Optional[float] = None,
@@ -35,24 +36,53 @@ def get_personalized_catalog(
     svc: EmbeddingService = Depends(get_embedding_service)
 ):
     """
-    Get personalized product catalog for a user.
+    Get personalized product catalog for a user with pagination.
     """
     if user_id not in svc.user_taste_vectors:
+        # Cold start - return products sorted by popularity
+        # Use all products, not just popular_products list
+        df = svc.products.copy()
+        
+        # Apply filters
+        if category_filter:
+            df = df[df["product_type_name"] == category_filter]
+        if price_min:
+            df = df[df["price"] >= price_min]
+        if price_max:
+            df = df[df["price"] <= price_max]
+        
+        # Paginate
+        df = df.iloc[offset:offset + k]
+        
         products = []
-        for item in svc.popular_products[:k]:
-            pid = item['product_id'] if isinstance(item, dict) else item
-            pid = str(pid).lstrip('0')
-            prod = svc.get_product(pid)
-            if prod:
-                prod["affinity_score"] = item.get('affinity_score', 0.5) if isinstance(item, dict) else 0.5
-                add_image_url(prod)
-                products.append(prod)
-        return {"products": products, "is_cold_start": True}
+        for _, row in df.iterrows():
+            prod = {
+                "id": row["id"],
+                "name": row["name"],
+                "category": row["product_type_name"],
+                "color": row["colour_group_name"],
+                "price": float(row.get("price", 49.99)),
+                "brand": row.get("index_group_name", ""),
+                "image_url": None,
+                "product_url": f"https://www2.hm.com/en_us/productpage.{row['id']}.html",
+                "affinity_score": 0.5
+            }
+            add_image_url(prod)
+            products.append(prod)
+        
+        return {
+            "products": products,
+            "is_cold_start": True,
+            "offset": offset,
+            "has_more": offset + k < len(svc.products)
+        }
     
+    # Personalized - search with larger k to allow for pagination
     taste_vector = svc.user_taste_vectors[user_id]
-    indices, scores = svc.search_similar(taste_vector, k=k * 3)
+    indices, scores = svc.search_similar(taste_vector, k=offset + k + 100)
     
     products = []
+    skipped = 0
     for i, idx in enumerate(indices):
         pid = svc.idx_to_id[idx]
         prod = svc.get_product(pid)
@@ -67,6 +97,11 @@ def get_personalized_catalog(
         if price_max and prod["price"] > price_max:
             continue
         
+        # Skip items before offset
+        if skipped < offset:
+            skipped += 1
+            continue
+        
         prod["affinity_score"] = float(scores[i])
         add_image_url(prod)
         products.append(prod)
@@ -74,7 +109,12 @@ def get_personalized_catalog(
         if len(products) >= k:
             break
     
-    return {"products": products, "is_cold_start": False}
+    return {
+        "products": products,
+        "is_cold_start": False,
+        "offset": offset,
+        "has_more": len(products) == k
+    }
 
 
 @router.post("/compute_taste_from_calibration")
