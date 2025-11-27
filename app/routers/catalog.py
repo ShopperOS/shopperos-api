@@ -33,6 +33,33 @@ def debug(svc: EmbeddingService = Depends(get_embedding_service)):
         "sample_product_ids": svc.products["id"].head(5).tolist()
     }
 
+@router.get("/get_product/{product_id}")
+def get_product(
+    product_id: str,
+    svc: EmbeddingService = Depends(get_embedding_service)
+):
+    """Get a single product by ID"""
+    row = svc.products[svc.products["id"] == product_id]
+    
+    if row.empty:
+        return {"error": "Product not found", "product": None}
+    
+    row = row.iloc[0]
+    prod = {
+        "id": row["id"],
+        "name": row["name"],
+        "category": row["product_type_name"],
+        "color": row["colour_group_name"],
+        "price": float(row.get("price", 49.99)),
+        "brand": row.get("index_group_name", ""),
+        "image_url": None,
+        "product_url": f"https://www2.hm.com/en_us/productpage.{row['id']}.html",
+        "description": row.get("detail_desc", ""),
+    }
+    add_image_url(prod)
+    
+    return {"product": prod}
+
 @router.post("/get_personalized_catalog")
 def get_personalized_catalog(
     user_id: str,
