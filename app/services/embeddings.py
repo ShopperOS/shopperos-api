@@ -18,7 +18,8 @@ class EmbeddingService:
         print("Loading embeddings...")
         
         # Load embeddings
-        self.embeddings = np.load(DATA_DIR / "embeddings" / "hybrid_embeddings.npy")
+        # Line 21 - add allow_pickle=True
+self.embeddings = np.load(DATA_DIR / "embeddings" / "hybrid_embeddings.npy", allow_pickle=True)
         
         # Load mappings
         with open(DATA_DIR / "embeddings" / "id_mappings.pkl", "rb") as f:
