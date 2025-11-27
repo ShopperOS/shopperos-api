@@ -20,7 +20,6 @@ def get_gender_filter(gender: Optional[str]) -> List[str]:
     elif gender == "female":
         return ["Ladieswear", "Divided", "Sport"]
     else:
-        # non-binary or unspecified - show all
         return ["Ladieswear", "Menswear", "Divided", "Sport", "Baby/Children"]
 
 @router.get("/debug")
@@ -31,10 +30,11 @@ def debug(svc: EmbeddingService = Depends(get_embedding_service)):
         "num_products": len(svc.products),
         "num_popular": len(svc.popular_products),
         "popular_sample": pop_sample,
-        "sample_product_ids": svc.products["id"].head(5).tolist()
+        "sample_product_ids": svc.products["id"].head(5).tolist(),
+        "supabase_connected": svc.supabase is not None
     }
 
-@router.get("/get_personalized_catalog")
+@router.post("/get_personalized_catalog")
 def get_personalized_catalog(
     user_id: str,
     k: int = Query(default=48, le=100),
@@ -51,7 +51,10 @@ def get_personalized_catalog(
     """
     gender_groups = get_gender_filter(gender)
     
-    if user_id not in svc.user_taste_vectors:
+    # Check if user has taste vector
+    taste_vector = svc.get_user_taste_vector(user_id)
+    
+    if taste_vector is None:
         # Cold start - return products filtered by gender
         df = svc.products.copy()
         
@@ -94,7 +97,6 @@ def get_personalized_catalog(
         }
     
     # Personalized - search with larger k to allow for filtering
-    taste_vector = svc.user_taste_vectors[user_id]
     indices, scores = svc.search_similar(taste_vector, k=(offset + k) * 3)
     
     products = []
@@ -107,7 +109,7 @@ def get_personalized_catalog(
             continue
         
         # Apply gender filter
-        if prod.get("brand") not in gender_groups and gender:
+        if gender and prod.get("brand") not in gender_groups:
             continue
             
         if category_filter and prod["category"] != category_filter:
@@ -137,6 +139,77 @@ def get_personalized_catalog(
     }
 
 
+@router.post("/compute_and_save_taste")
+def compute_and_save_taste(
+    user_id: str,
+    liked_ids: List[str],
+    disliked_ids: List[str] = [],
+    svc: EmbeddingService = Depends(get_embedding_service)
+):
+    """
+    Compute taste vector from calibration swipes and save to Supabase.
+    Called at the end of onboarding.
+    """
+    if not liked_ids:
+        return {"error": "Need at least one liked product", "success": False}
+    
+    # Get embeddings for liked items
+    liked_vectors = []
+    for pid in liked_ids:
+        emb = svc.get_embedding(pid)
+        if emb is not None:
+            liked_vectors.append(emb)
+    
+    if not liked_vectors:
+        return {"error": "No valid products found", "success": False}
+    
+    # Compute taste as average of likes
+    taste_vector = np.mean(liked_vectors, axis=0)
+    
+    # Subtract dislikes if any
+    if disliked_ids:
+        disliked_vectors = []
+        for pid in disliked_ids:
+            emb = svc.get_embedding(pid)
+            if emb is not None:
+                disliked_vectors.append(emb)
+        if disliked_vectors:
+            dislike_avg = np.mean(disliked_vectors, axis=0)
+            taste_vector = taste_vector - 0.3 * dislike_avg
+    
+    # Normalize
+    taste_vector = taste_vector / (np.linalg.norm(taste_vector) + 1e-8)
+    
+    # Save to Supabase
+    success = svc.save_user_taste_vector(user_id, taste_vector)
+    
+    if not success:
+        return {"error": "Failed to save taste vector", "success": False}
+    
+    # Get initial recommendations
+    indices, scores = svc.search_similar(taste_vector, k=10)
+    
+    products = []
+    seen = set(liked_ids + disliked_ids)
+    for i, idx in enumerate(indices):
+        pid = svc.idx_to_id[idx]
+        if pid in seen:
+            continue
+        prod = svc.get_product(pid)
+        if prod:
+            prod["affinity_score"] = float(scores[i])
+            add_image_url(prod)
+            products.append(prod)
+        if len(products) >= 5:
+            break
+    
+    return {
+        "success": True,
+        "message": "Taste profile saved",
+        "recommendations": products
+    }
+
+
 @router.post("/compute_taste_from_calibration")
 def compute_taste_from_calibration(
     liked_ids: List[str],
@@ -145,6 +218,7 @@ def compute_taste_from_calibration(
 ):
     """
     Compute taste vector from onboarding calibration (20 swipes).
+    Returns recommendations but doesn't save.
     """
     if not liked_ids:
         return {"error": "Need at least one liked product"}
@@ -231,3 +305,10 @@ def get_calibration_products(
             break
     
     return {"products": products[:n]}
+```
+
+Now you need to:
+
+1. **Add `supabase` to requirements.txt:**
+```
+supabase
