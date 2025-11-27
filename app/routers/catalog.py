@@ -87,11 +87,12 @@ def get_personalized_catalog(
     price_min: Optional[float] = None,
     price_max: Optional[float] = None,
     shuffle: bool = Query(default=False),
+    personalized: bool = Query(default=True),
     exclude_purchased: bool = True,
     svc: EmbeddingService = Depends(get_embedding_service)
 ):
     gender_groups = get_gender_filter(gender)
-    taste_vector = svc.get_user_taste_vector(user_id)
+    taste_vector = svc.get_user_taste_vector(user_id) if personalized else None
     
     if taste_vector is None:
         df = svc.products.copy()
