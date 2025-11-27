@@ -6,6 +6,9 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y git-lfs && rm -rf /var/lib/apt/lists/*
 RUN git lfs install
 
+# Cache bust - change this value to force fresh clone
+ARG CACHEBUST=1
+
 # Clone repo and pull LFS files
 ARG GITHUB_TOKEN
 RUN git clone https://${GITHUB_TOKEN}@github.com/ShopperOS/shopperos-api.git . && git lfs pull
