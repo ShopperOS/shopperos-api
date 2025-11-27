@@ -8,7 +8,7 @@ RUN git lfs install
 
 # Clone repo and pull LFS files
 ARG GITHUB_TOKEN
-RUN git clone https://${GITHUB_TOKEN}@github.com/dustinhaggett/shopperos-api.git . && git lfs pull
+RUN git clone https://${GITHUB_TOKEN}@github.com/ShopperOS/shopperos-api.git . && git lfs pull
 
 # Install dependencies
 RUN pip install --no-cache-dir -r requirements.txt
