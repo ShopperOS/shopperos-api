@@ -86,6 +86,7 @@ def get_personalized_catalog(
     category_filter: Optional[str] = None,
     price_min: Optional[float] = None,
     price_max: Optional[float] = None,
+    search: Optional[str] = Query(default=None),
     shuffle: bool = Query(default=False),
     personalized: bool = Query(default=True),
     exclude_purchased: bool = True,
@@ -106,10 +107,18 @@ def get_personalized_catalog(
             df = df[df["price"] >= price_min]
         if price_max:
             df = df[df["price"] <= price_max]
+        if search:
+            search_lower = search.lower()
+            df = df[
+                df["name"].str.lower().str.contains(search_lower, na=False) |
+                df["product_type_name"].str.lower().str.contains(search_lower, na=False) |
+                df["colour_group_name"].str.lower().str.contains(search_lower, na=False)
+            ]
         
         if shuffle:
             df = df.sample(frac=1).reset_index(drop=True)
         
+        total_filtered = len(df)
         df = df.iloc[offset:offset + k]
         
         products = []
@@ -128,16 +137,15 @@ def get_personalized_catalog(
             add_image_url(prod)
             products.append(prod)
         
-        total = len(svc.products) if not gender else len(svc.products[svc.products["index_group_name"].isin(gender_groups)])
         return {
             "products": products,
             "is_cold_start": True,
             "offset": offset,
-            "has_more": offset + k < total
+            "has_more": offset + k < total_filtered
         }
     
     # Search more when filtering to find enough matches
-    search_multiplier = 20 if category_filter else 3
+    search_multiplier = 20 if (category_filter or search) else 3
     indices, scores = svc.search_similar(taste_vector, k=(offset + k) * search_multiplier)
     
     products = []
@@ -157,6 +165,13 @@ def get_personalized_catalog(
             continue
         if price_max and prod["price"] > price_max:
             continue
+        if search:
+            search_lower = search.lower()
+            name_match = search_lower in prod["name"].lower()
+            cat_match = search_lower in prod["category"].lower()
+            color_match = search_lower in prod["color"].lower()
+            if not (name_match or cat_match or color_match):
+                continue
         
         if skipped < offset:
             skipped += 1
