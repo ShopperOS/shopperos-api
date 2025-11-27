@@ -69,6 +69,7 @@ def get_personalized_catalog(
     category_filter: Optional[str] = None,
     price_min: Optional[float] = None,
     price_max: Optional[float] = None,
+    shuffle: bool = Query(default=False),
     exclude_purchased: bool = True,
     svc: EmbeddingService = Depends(get_embedding_service)
 ):
@@ -77,7 +78,9 @@ def get_personalized_catalog(
     
     if taste_vector is None:
         df = svc.products.copy()
-        df = df[df["index_group_name"].isin(gender_groups)]
+        
+        if gender:
+            df = df[df["index_group_name"].isin(gender_groups)]
         
         if category_filter:
             df = df[df["product_type_name"] == category_filter]
@@ -85,6 +88,9 @@ def get_personalized_catalog(
             df = df[df["price"] >= price_min]
         if price_max:
             df = df[df["price"] <= price_max]
+        
+        if shuffle:
+            df = df.sample(frac=1).reset_index(drop=True)
         
         df = df.iloc[offset:offset + k]
         
@@ -104,12 +110,12 @@ def get_personalized_catalog(
             add_image_url(prod)
             products.append(prod)
         
-        total_filtered = len(svc.products[svc.products["index_group_name"].isin(gender_groups)])
+        total = len(svc.products) if not gender else len(svc.products[svc.products["index_group_name"].isin(gender_groups)])
         return {
             "products": products,
             "is_cold_start": True,
             "offset": offset,
-            "has_more": offset + k < total_filtered
+            "has_more": offset + k < total
         }
     
     indices, scores = svc.search_similar(taste_vector, k=(offset + k) * 3)
