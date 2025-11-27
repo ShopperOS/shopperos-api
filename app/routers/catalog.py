@@ -16,7 +16,7 @@ def add_image_url(product: dict) -> dict:
 def get_gender_filter(gender: Optional[str]) -> List[str]:
     """Map user gender to product index_group_name values"""
     if gender == "male":
-        return ["Menswear", "Sport"]
+        return ["Menswear"]
     elif gender == "female":
         return ["Ladieswear", "Divided", "Sport"]
     else:
