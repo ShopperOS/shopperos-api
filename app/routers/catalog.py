@@ -13,6 +13,16 @@ def add_image_url(product: dict) -> dict:
         product["image_url"] = f"https://pub-7907e757920c43e5a62f414cfbe74387.r2.dev/{folder}/{pid}.jpg"
     return product
 
+def get_gender_filter(gender: Optional[str]) -> List[str]:
+    """Map user gender to product index_group_name values"""
+    if gender == "male":
+        return ["Menswear", "Divided", "Sport"]
+    elif gender == "female":
+        return ["Ladieswear", "Divided", "Sport"]
+    else:
+        # non-binary or unspecified - show all
+        return ["Ladieswear", "Menswear", "Divided", "Sport", "Baby/Children"]
+
 @router.get("/debug")
 def debug(svc: EmbeddingService = Depends(get_embedding_service)):
     """Debug endpoint to check data loading"""
@@ -29,6 +39,7 @@ def get_personalized_catalog(
     user_id: str,
     k: int = Query(default=48, le=100),
     offset: int = Query(default=0, ge=0),
+    gender: Optional[str] = Query(default=None),
     category_filter: Optional[str] = None,
     price_min: Optional[float] = None,
     price_max: Optional[float] = None,
@@ -38,12 +49,16 @@ def get_personalized_catalog(
     """
     Get personalized product catalog for a user with pagination.
     """
+    gender_groups = get_gender_filter(gender)
+    
     if user_id not in svc.user_taste_vectors:
-        # Cold start - return products sorted by popularity
-        # Use all products, not just popular_products list
+        # Cold start - return products filtered by gender
         df = svc.products.copy()
         
-        # Apply filters
+        # Apply gender filter
+        df = df[df["index_group_name"].isin(gender_groups)]
+        
+        # Apply other filters
         if category_filter:
             df = df[df["product_type_name"] == category_filter]
         if price_min:
@@ -70,16 +85,17 @@ def get_personalized_catalog(
             add_image_url(prod)
             products.append(prod)
         
+        total_filtered = len(svc.products[svc.products["index_group_name"].isin(gender_groups)])
         return {
             "products": products,
             "is_cold_start": True,
             "offset": offset,
-            "has_more": offset + k < len(svc.products)
+            "has_more": offset + k < total_filtered
         }
     
-    # Personalized - search with larger k to allow for pagination
+    # Personalized - search with larger k to allow for filtering
     taste_vector = svc.user_taste_vectors[user_id]
-    indices, scores = svc.search_similar(taste_vector, k=offset + k + 100)
+    indices, scores = svc.search_similar(taste_vector, k=(offset + k) * 3)
     
     products = []
     skipped = 0
@@ -90,6 +106,10 @@ def get_personalized_catalog(
         if prod is None:
             continue
         
+        # Apply gender filter
+        if prod.get("brand") not in gender_groups and gender:
+            continue
+            
         if category_filter and prod["category"] != category_filter:
             continue
         if price_min and prod["price"] < price_min:
@@ -177,20 +197,25 @@ def compute_taste_from_calibration(
 @router.get("/get_calibration_products")
 def get_calibration_products(
     n: int = Query(default=20, le=50),
+    gender: Optional[str] = Query(default=None),
     svc: EmbeddingService = Depends(get_embedding_service)
 ):
     """
     Get diverse products for onboarding calibration.
     """
-    categories = svc.products["product_type_name"].value_counts().head(10).index.tolist()
+    gender_groups = get_gender_filter(gender)
+    
+    # Filter by gender first
+    df = svc.products[svc.products["index_group_name"].isin(gender_groups)]
+    
+    categories = df["product_type_name"].value_counts().head(10).index.tolist()
     
     products = []
     per_category = max(2, n // len(categories))
     
     for cat in categories:
-        cat_prods = svc.products[svc.products["product_type_name"] == cat].sample(
-            min(per_category, len(svc.products[svc.products["product_type_name"] == cat]))
-        )
+        cat_df = df[df["product_type_name"] == cat]
+        cat_prods = cat_df.sample(min(per_category, len(cat_df)))
         for _, row in cat_prods.iterrows():
             prod = {
                 "id": row["id"],
