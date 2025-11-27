@@ -209,3 +209,41 @@ def get_calibration_products(
             break
     
     return {"products": products[:n]}
+
+
+@router.get("/get_discovery_feed")
+def get_discovery_feed(
+    user_id: str,
+    gender: Optional[str] = Query(default=None),
+    svc: EmbeddingService = Depends(get_embedding_service)
+):
+    gender_groups = get_gender_filter(gender)
+    df = svc.products[svc.products["index_group_name"].isin(gender_groups)]
+    
+    just_for_today = df.sample(min(10, len(df)))
+    new_arrivals = df.head(10)
+    trending = df.sample(min(10, len(df)))
+    
+    def to_product_list(subset):
+        products = []
+        for _, row in subset.iterrows():
+            prod = {
+                "id": row["id"],
+                "name": row["name"],
+                "category": row["product_type_name"],
+                "color": row["colour_group_name"],
+                "price": float(row.get("price", 49.99)),
+                "brand": row.get("index_group_name", ""),
+                "image_url": None,
+            }
+            add_image_url(prod)
+            products.append(prod)
+        return products
+    
+    return {
+        "sections": {
+            "just_for_today": {"title": "Just For Today", "products": to_product_list(just_for_today)},
+            "new_arrivals": {"title": "New Arrivals in Your Style", "products": to_product_list(new_arrivals)},
+            "trending_in_size": {"title": "Trending in Your Size", "products": to_product_list(trending)}
+        }
+    }
